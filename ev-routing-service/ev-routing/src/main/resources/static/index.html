@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EV Eco-Route Planner</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --regen:   #00FF00;
+      --drain:   #007BFF;
+      --accent:  #00E5FF;
+      --bg:      rgba(8, 10, 18, 0.82);
+      --surface: rgba(15, 20, 35, 0.72);
+      --border:  rgba(0, 229, 255, 0.18);
+      --text:    #E8EDF5;
+      --muted:   #7A8BA0;
+      --success:  #00FF00;
+      --radius:  14px;
+      --mono: 'Space Mono', monospace;
+      --sans: 'DM Sans', sans-serif;
+    }
+
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { font-family: var(--sans); background: #0a0e1a; }
+
+    /* ── Map ── */
+    #map {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Dark tile filter */
+    .leaflet-layer,
+    .leaflet-control-zoom-in,
+    .leaflet-control-zoom-out,
+    .leaflet-control-attribution {
+      filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.7);
+    }
+    .leaflet-control-zoom {
+      border: none !important;
+      border-radius: 10px !important;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5) !important;
+    }
+    .leaflet-control-zoom-in,
+    .leaflet-control-zoom-out {
+      background: rgba(15,20,35,0.88) !important;
+      color: var(--accent) !important;
+      font-size: 18px !important;
+      border: none !important;
+    }
+    .leaflet-control-attribution {
+      background: rgba(8,10,18,0.6) !important;
+      color: var(--muted) !important;
+      font-size: 10px !important;
+    }
+
+    /* ── Panel ── */
+    #panel {
+      position: fixed;
+      top: 22px;
+      left: 22px;
+      z-index: 1000;
+      width: 300px;
+      background: var(--bg);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow:
+        0 0 0 1px rgba(0,229,255,0.06),
+        0 8px 40px rgba(0,0,0,0.6),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+      overflow: hidden;
+      animation: slideIn 0.5s cubic-bezier(0.16,1,0.3,1) both;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-24px) scale(0.97); }
+      to   { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    /* Panel header */
+    .panel-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+    .panel-header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--drain), var(--accent), var(--regen));
+    }
+    .panel-logo {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .panel-logo-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--drain), var(--accent));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      box-shadow: 0 0 16px rgba(0,123,255,0.5);
+    }
+    .panel-title {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.04em;
+      line-height: 1.1;
+    }
+    .panel-sub {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* Steps */
+    .steps {
+      padding: 16px 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 9px;
+      border: 1px solid rgba(255,255,255,0.05);
+      background: var(--surface);
+      transition: all 0.25s ease;
+    }
+    .step.active {
+      border-color: rgba(0,229,255,0.3);
+      background: rgba(0,229,255,0.06);
+    }
+    .step.done {
+      border-color: rgba(0,255,0,0.25);
+      background: rgba(0,255,0,0.05);
+    }
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: all 0.25s ease;
+    }
+    .step.active .step-dot {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .step.done .step-dot {
+      background: var(--regen);
+      box-shadow: 0 0 8px var(--regen);
+      animation: none;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.75); }
+    }
+    .step-text {
+      font-size: 12.5px;
+      color: var(--muted);
+      font-weight: 400;
+      transition: color 0.25s;
+    }
+    .step.active .step-text { color: var(--text); }
+    .step.done .step-text { color: var(--regen); }
+
+    /* Coordinates display */
+    .coords-block {
+      margin: 0 20px 12px;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 9px;
+      border: 1px solid rgba(255,255,255,0.04);
+      display: none;
+    }
+    .coords-block.visible { display: block; }
+    .coord-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .coord-row:last-child { margin-bottom: 0; }
+    .coord-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .coord-val {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--accent);
+    }
+
+    /* Calculate button */
+    .btn-calc {
+      display: block;
+      margin: 0 20px 16px;
+      width: calc(100% - 40px);
+      padding: 12px;
+      border: none;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--drain) 0%, var(--accent) 100%);
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 20px rgba(0,123,255,0.4);
+    }
+    .btn-calc::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+    }
+    .btn-calc:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 28px rgba(0,123,255,0.55);
+    }
+    .btn-calc:active:not(:disabled) { transform: translateY(0); }
+    .btn-calc:disabled {
+      background: rgba(255,255,255,0.07);
+      color: var(--muted);
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .btn-calc.loading {
+      background: linear-gradient(135deg, #0a1a3a, #0d2a3a);
+      animation: shimmer 1.5s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0%   { box-shadow: 0 0 0 rgba(0,229,255,0.3); }
+      50%  { box-shadow: 0 0 24px rgba(0,229,255,0.5); }
+      100% { box-shadow: 0 0 0 rgba(0,229,255,0.3); }
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border: 2px solid rgba(0,229,255,0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 7px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results */
+    #results {
+      margin: 0 20px 18px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      animation: fadeUp 0.4s ease both;
+    }
+    #results.visible { display: flex; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .results-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      margin: 0 20px 12px;
+    }
+    .results-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .result-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 14px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 9px;
+    }
+    .result-info { display: flex; flex-direction: column; gap: 2px; }
+    .result-name {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+      letter-spacing: 0.04em;
+    }
+    .result-value {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+    .result-icon { font-size: 22px; opacity: 0.7; }
+
+    /* Legend */
+    .legend {
+      margin: 0 20px 18px;
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-line {
+      width: 22px;
+      height: 3px;
+      border-radius: 2px;
+    }
+    .legend-text {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* Reset button */
+    .btn-reset {
+      display: block;
+      margin: 0 20px 18px;
+      width: calc(100% - 40px);
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-reset:hover {
+      border-color: rgba(0,229,255,0.35);
+      color: var(--accent);
+      background: rgba(0,229,255,0.05);
+    }
+
+    /* Error toast */
+    #error-toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      z-index: 2000;
+      background: rgba(220, 40, 40, 0.9);
+      backdrop-filter: blur(16px);
+      color: #fff;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+      white-space: nowrap;
+    }
+    #error-toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Custom marker styles (via DivIcon) */
+    .marker-pin {
+      width: 38px;
+      height: 38px;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    .marker-pin-inner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transform: rotate(45deg);
+    }
+    .marker-start .marker-pin { background: linear-gradient(135deg, #007BFF, #00E5FF); }
+    .marker-end   .marker-pin { background: linear-gradient(135deg, #FF6B00, #FF0062); }
+
+    /* Leaflet popup overrides */
+    .leaflet-popup-content-wrapper {
+      background: var(--bg) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 10px !important;
+      backdrop-filter: blur(20px) !important;
+      color: var(--text) !important;
+      font-family: var(--mono) !important;
+      font-size: 11px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+    }
+    .leaflet-popup-tip { background: var(--bg) !important; }
+    .leaflet-popup-close-button { color: var(--muted) !important; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- ── Control Panel ── -->
+<div id="panel">
+  <!-- Header -->
+  <div class="panel-header">
+    <div class="panel-logo">
+      <div class="panel-logo-icon">⚡</div>
+      <div>
+        <div class="panel-title">EV ECO-ROUTE</div>
+        <div class="panel-sub">Physics-based planner</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step active" id="step-start">
+      <div class="step-dot"></div>
+      <div class="step-text">Click map → Set <strong>Start</strong> pin</div>
+    </div>
+    <div class="step" id="step-end">
+      <div class="step-dot"></div>
+      <div class="step-text">Click map → Set <strong>Destination</strong> pin</div>
+    </div>
+  </div>
+
+  <!-- Coordinates -->
+  <div class="coords-block" id="coords-block">
+    <div class="coord-row">
+      <span class="coord-label">▲ Start</span>
+      <span class="coord-val" id="coord-start">—</span>
+    </div>
+    <div class="coord-row">
+      <span class="coord-label">▼ End</span>
+      <span class="coord-val" id="coord-end">—</span>
+    </div>
+  </div>
+
+  <!-- Calculate -->
+  <button class="btn-calc" id="btn-calc" disabled>CALCULATE ECO-ROUTE</button>
+
+  <!-- Results -->
+  <div class="results-divider" id="results-divider" style="display:none"></div>
+  <div class="results-label" id="results-label" style="display:none; margin: 0 20px 8px; font-family: var(--mono); font-size: 9px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase;">Route Analysis</div>
+  <div id="results">
+    <div class="result-card">
+      <div class="result-info">
+        <div class="result-name">TOTAL DISTANCE</div>
+        <div class="result-value" id="res-dist">—</div>
+      </div>
+      <div class="result-icon">📍</div>
+    </div>
+    <div class="result-card">
+      <div class="result-info">
+        <div class="result-name">NET ENERGY</div>
+        <div class="result-value" id="res-energy">—</div>
+      </div>
+      <div class="result-icon">🔋</div>
+    </div>
+  </div>
+
+  <!-- Legend (shown after route) -->
+  <div class="legend" id="legend" style="display:none">
+    <div class="legend-item">
+      <div class="legend-line" style="background:#007BFF"></div>
+      <div class="legend-text">Battery Drain</div>
+    </div>
+    <div class="legend-item">
+      <div class="legend-line" style="background:#00FF00; box-shadow: 0 0 6px #00FF00;"></div>
+      <div class="legend-text">Regen Zone</div>
+    </div>
+  </div>
+
+  <!-- Reset -->
+  <button class="btn-reset" id="btn-reset" style="display:none">↺ RESET ROUTE</button>
+</div>
+
+<!-- Error Toast -->
+<div id="error-toast">⚠ Could not connect to backend.</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  const state = {
+    clickCount: 0,
+    startLatLng: null,
+    endLatLng: null,
+    startMarker: null,
+    endMarker: null,
+    routeLayer: null,
+  };
+
+  // ── Map Init ───────────────────────────────────────────────────────────────
+  const map = L.map('map', {
+    center: [15.38, 73.82],
+    zoom: 12,
+    zoomControl: true,
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // ── Custom Marker Icons ────────────────────────────────────────────────────
+  function makeIcon(type) {
+    const cls = type === 'start' ? 'marker-start' : 'marker-end';
+    return L.divIcon({
+      className: '',
+      html: `<div class="${cls}" style="position:relative;width:38px;height:38px;">
+               <div class="marker-pin" style="width:100%;height:100%;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;
+                 background:${type === 'start' ? 'linear-gradient(135deg,#007BFF,#00E5FF)' : 'linear-gradient(135deg,#FF6B00,#FF0062)'};
+                 box-shadow:0 4px 18px rgba(0,0,0,0.55);">
+                 <div style="width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,0.9);transform:rotate(45deg);"></div>
+               </div>
+             </div>`,
+      iconSize: [38, 38],
+      iconAnchor: [19, 38],
+      popupAnchor: [0, -40],
+    });
+  }
+
+  // ── UI Refs ────────────────────────────────────────────────────────────────
+  const btnCalc       = document.getElementById('btn-calc');
+  const btnReset      = document.getElementById('btn-reset');
+  const stepStart     = document.getElementById('step-start');
+  const stepEnd       = document.getElementById('step-end');
+  const coordsBlock   = document.getElementById('coords-block');
+  const coordStart    = document.getElementById('coord-start');
+  const coordEnd      = document.getElementById('coord-end');
+  const results       = document.getElementById('results');
+  const resDist       = document.getElementById('res-dist');
+  const resEnergy     = document.getElementById('res-energy');
+  const legend        = document.getElementById('legend');
+  const errorToast    = document.getElementById('error-toast');
+  const resultsDivider= document.getElementById('results-divider');
+  const resultsLabel  = document.getElementById('results-label');
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function fmt(lat, lng) {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+
+  function showError(msg) {
+    errorToast.textContent = '⚠ ' + msg;
+    errorToast.classList.add('show');
+    setTimeout(() => errorToast.classList.remove('show'), 4000);
+  }
+
+  function updateStepUI() {
+    const n = state.clickCount;
+    // Step 1
+    stepStart.className = 'step' + (n === 0 ? ' active' : ' done');
+    // Step 2
+    stepEnd.className   = 'step' + (n === 1 ? ' active' : n >= 2 ? ' done' : '');
+    // Coords
+    if (n >= 1) {
+      coordsBlock.classList.add('visible');
+      coordStart.textContent = fmt(state.startLatLng.lat, state.startLatLng.lng);
+    }
+    if (n >= 2) {
+      coordEnd.textContent = fmt(state.endLatLng.lat, state.endLatLng.lng);
+      btnCalc.disabled = false;
+    } else {
+      coordEnd.textContent = '—';
+      btnCalc.disabled = true;
+    }
+  }
+
+  function clearRoute() {
+    if (state.routeLayer) { map.removeLayer(state.routeLayer); state.routeLayer = null; }
+    results.classList.remove('visible');
+    resultsDivider.style.display = 'none';
+    resultsLabel.style.display = 'none';
+    legend.style.display = 'none';
+    btnReset.style.display = 'none';
+  }
+
+  function resetAll() {
+    state.clickCount = 0;
+    state.startLatLng = null;
+    state.endLatLng = null;
+    if (state.startMarker) { map.removeLayer(state.startMarker); state.startMarker = null; }
+    if (state.endMarker)   { map.removeLayer(state.endMarker);   state.endMarker   = null; }
+    clearRoute();
+    coordsBlock.classList.remove('visible');
+    coordStart.textContent = '—';
+    coordEnd.textContent   = '—';
+    btnCalc.disabled = true;
+    btnCalc.textContent = 'CALCULATE ECO-ROUTE';
+    btnCalc.classList.remove('loading');
+    updateStepUI();
+  }
+
+  // ── Map Click ─────────────────────────────────────────────────────────────
+  map.on('click', function(e) {
+    const { lat, lng } = e.latlng;
+
+    // Third click = reset pins & start over
+    if (state.clickCount >= 2) { resetAll(); }
+
+    if (state.clickCount === 0) {
+      state.startLatLng = e.latlng;
+      if (state.startMarker) map.removeLayer(state.startMarker);
+      state.startMarker = L.marker([lat, lng], { icon: makeIcon('start') })
+        .addTo(map)
+        .bindPopup(`<strong>⚡ Start</strong><br>${fmt(lat, lng)}`);
+      state.clickCount = 1;
+
+    } else if (state.clickCount === 1) {
+      state.endLatLng = e.latlng;
+      if (state.endMarker) map.removeLayer(state.endMarker);
+      state.endMarker = L.marker([lat, lng], { icon: makeIcon('end') })
+        .addTo(map)
+        .bindPopup(`<strong>🏁 Destination</strong><br>${fmt(lat, lng)}`);
+      state.clickCount = 2;
+    }
+
+    updateStepUI();
+  });
+
+  // ── Calculate Route ────────────────────────────────────────────────────────
+  btnCalc.addEventListener('click', async () => {
+    if (!state.startLatLng || !state.endLatLng) return;
+
+    // Loading state
+    btnCalc.disabled = true;
+    btnCalc.classList.add('loading');
+    btnCalc.innerHTML = '<span class="spinner"></span>CALCULATING PHYSICS…';
+    clearRoute();
+
+    const payload = {
+      startLat: state.startLatLng.lat,
+      startLon: state.startLatLng.lng,
+      endLat:   state.endLatLng.lat,
+      endLon:   state.endLatLng.lng,
+    };
+
+    try {
+      const res = await fetch('https://ev-java-backend.onrender.com/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+
+      const data = await res.json();
+      renderRoute(data);
+
+    } catch (err) {
+      console.error(err);
+      showError('Backend unreachable. Is Spring Boot running on :8080?');
+      btnCalc.disabled = false;
+      btnCalc.classList.remove('loading');
+      btnCalc.textContent = 'CALCULATE ECO-ROUTE';
+    }
+  });
+
+  // ── Render GeoJSON Route ───────────────────────────────────────────────────
+  function renderRoute(data) {
+    const { totalDistanceKm, totalEnergyKwh, routeGeoJson } = data;
+
+    // Draw route with segment coloring
+    state.routeLayer = L.geoJSON(routeGeoJson, {
+      style: function(feature) {
+        const isRegen = feature.properties && feature.properties.is_regen_zone === true;
+        if (isRegen) {
+          return {
+            color: '#003300',      // dark outline beneath
+            weight: 8,
+            opacity: 1,
+            lineCap: 'round',
+            lineJoin: 'round',
+          };
+        }
+        return {
+          color: 'rgba(0,60,120,0.6)', // subtle blue outline
+          weight: 8,
+          opacity: 1,
+          lineCap: 'round',
+          lineJoin: 'round',
+        };
+      },
+      onEachFeature: function(feature, layer) {
+        // Add a brighter inner line on top for visual pop
+        if (feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiLineString') {
+          const isRegen = feature.properties && feature.properties.is_regen_zone === true;
+          const innerColor = isRegen ? '#00FF00' : '#007BFF';
+          const innerWeight = isRegen ? 5 : 4;
+          const innerGlow   = isRegen ? '#00FF88' : '#00AAFF';
+
+          // Outer glow layer
+          const glowLayer = L.geoJSON(feature, {
+            style: {
+              color: innerGlow,
+              weight: isRegen ? 10 : 7,
+              opacity: isRegen ? 0.18 : 0.12,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }
+          }).addTo(map);
+
+          // Main colored line
+          const mainLayer = L.geoJSON(feature, {
+            style: {
+              color: innerColor,
+              weight: innerWeight,
+              opacity: 0.9,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }
+          }).addTo(map);
+
+          // Tooltip on hover
+          const label = isRegen
+            ? '⚡ Regen Zone — energy recovered'
+            : '🔋 Battery Drain segment';
+          mainLayer.bindTooltip(label, { sticky: true, className: '', opacity: 0.95 });
+        }
+      }
+    }).addTo(map);
+
+    // Fit map to route
+    try {
+      const bounds = state.routeLayer.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 80] });
+    } catch(e) {}
+
+    // Show results
+    resDist.textContent   = `${parseFloat(totalDistanceKm).toFixed(1)} km`;
+    resEnergy.textContent = `${parseFloat(totalEnergyKwh).toFixed(2)} kWh`;
+
+    results.classList.add('visible');
+    resultsDivider.style.display = 'block';
+    resultsLabel.style.display = 'block';
+    legend.style.display = 'flex';
+    btnReset.style.display = 'block';
+
+    // Restore button
+    btnCalc.disabled = false;
+    btnCalc.classList.remove('loading');
+    btnCalc.textContent = '↻ RECALCULATE';
+  }
+
+  // ── Reset Button ──────────────────────────────────────────────────────────
+  btnReset.addEventListener('click', resetAll);
+
+  // ── Init step UI ──────────────────────────────────────────────────────────
+  updateStepUI();
+</script>
+</body>
+</html>

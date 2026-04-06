@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+
+  # ── Java Spring Boot Orchestration Service ──
+  ev-routing:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ORS_API_KEY=${ORS_API_KEY}
+      - PYTHON_ENGINE_URL=http://python-engine:8000
+    depends_on:
+      - python-engine
+    networks:
+      - ev-net
+
+  # ── Local Python Physics Engine ──
+  # Replace ./python-engine with the path to your Python service
+  python-engine:
+    build: ./python-engine
+    ports:
+      - "8000:8000"
+    networks:
+      - ev-net
+
+networks:
+  ev-net:
+    driver: bridge
