@@ -1,0 +1,19 @@
+# Maven
+target/
+*.class
+*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.project
+*.classpath
+
+# Secrets — NEVER commit these
+.env
+application-prod.properties
+
+# OS
+.DS_Store
+Thumbs.db
